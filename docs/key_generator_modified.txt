@@ -1,0 +1,150 @@
+
+新版 generate_data_keys_subsample(config, recs_list, mode) 设计：
+入口与基本设定
+
+参数归一化
+
+mode 归一化为 'binary' 或 'triple'（接受 tri/triple/3/three 等别名→都映射为 'triple'）。
+
+非法值直接 ValueError。
+
+从 config 读取关键超参
+
+preictal_sec（默认 300s）、boundary（默认 0.5）
+
+frame（窗长秒）、stride（负样本用的稀疏步长）、stride_s（正样本用的密集步长；若没配则用 stride/2）
+
+factor（负样本抽样比例，默认 5）
+
+工具函数
+
+overlap_frac(a0,a1,b0,b1)：计算两个区间重叠占 a 的比例（作为“覆盖率”）。
+
+_build_intervals(events)：从事件 (on,off) 列表构造
+
+ictal 区间：原样
+
+preictal 区间：[max(prev_off, on - preictal_sec), on)，保证不跨越前一次发作结束，并裁到 ≥0
+
+_tri_for_windows(seg_start, seg_stop, ictals, preictals)：对一组窗，按 boundary 判三类：
+
+先判与 ictal 覆盖率≥boundary → 2
+
+否则判与 preictal 覆盖率≥boundary → 1
+
+否则 → 0
+
+两个“桶”/缓冲区（保留原结构）
+
+segments_S：保留样本（正类），用密集步长 stride_s 生成；
+
+binary 模式：仅包含 ictal
+
+triple 模式：包含 ictal + preictal
+
+segments_NS：背景候选样本（负类池），用稀疏步长 stride 生成，仅放 interictal。
+
+所有放入任一桶的行统一格式：
+[rec_idx, seg_start, seg_stop, binary_label, tri_label]
+其中 binary_label：0=interictal，1=ictal；tri_label：0/1/2=inter/pre/ictal。
+
+遍历每条录制（for idx, f in recs_list）
+
+加载标注
+
+Annotation.loadAnnotation(config.data_path, f)
+
+得到 events（[(on,off), ...]）和 rec_duration。
+
+构建区间
+
+ictal_intervals, preictal_intervals = _build_intervals(events)
+
+无事件的录制
+
+整段都是 interictal：按 stride 生成 [0, duration] 上的窗。
+
+直接打上 bin=0, tri=0，全部进 segments_NS（作为负样本候选）。
+
+有事件的录制（分三部分生成）
+
+A. ictal 正样本（两个模式都保留）
+
+对每个事件 (on, off)：
+
+计算“密集采样范围”
+start_dense = on - frame*(1 - boundary)
+end_dense = off + frame*(1 - boundary)
+这样能把覆盖率恰好达到阈值的擦边窗也纳入候选（保守-padding 思路）。
+
+以 stride_s 密集滑窗，过滤掉 seg_start < 0 和 seg_stop > duration 的窗。
+
+这些窗直接标为 ictal：bin=1, tri=2，加入 segments_S。
+
+B. preictal 正样本（仅 'triple' 模式保留）
+
+对每个事件 (on, off)：
+
+pre_start = max(prev_off, on - preictal_sec)、pre_end = on（可能被截短）
+
+同样做“密集采样范围”的边界 padding：
+start_dense = pre_start - frame*(1 - boundary)
+end_dense = pre_end + frame*(1 - boundary)
+
+以 stride_s 密集滑窗并裁合法时长。
+
+再用 _tri_for_windows 严格确认 tri==1（避免误收 ictal 或 interictal）。
+
+保留下来的 preictal 窗，标 bin=0, tri=1，加入 segments_S。
+
+C. interictal 背景候选（两个模式都做）
+
+三段区域分别用 stride 稀疏滑窗：
+
+首发作前：[0, first_on)
+
+相邻发作之间：[prev_off, next_on)
+
+末发作后：[last_off, duration)
+
+对这些窗用 _tri_for_windows 判三类，仅保留 tri==0 的纯 interictal，标 bin=0, tri=0，放入 segments_NS。
+
+负样本抽样 & 拼接
+
+计算“正样本数” n_pos（影响负样本抽样数量）
+
+binary：只把 segments_S 里 binary_label==1（ictal） 的个数算作正样本。
+
+triple：segments_S 里既有 ictal 又有 preictal，全部计入正样本数。
+
+从负样本候选中抽样
+
+目标数量 sample_n = min(len(segments_NS), factor * n_pos)。
+
+随机抽取 sample_n 条 interictal 候选加入 segments_S。
+
+打乱与返回
+
+random.shuffle(segments_S)
+
+返回混合后的列表（每行 5 列）。
+
+重要细节/边界处理
+
+preictal 不跨 ictal：pre_start = max(prev_off, on - preictal_sec)，避免跨过上一段发作结束。
+
+覆盖率阈值：三分类判定采用 boundary（默认 0.5）。ictal 优先于 preictal。
+
+密集/稀疏步长：正样本用 stride_s（更密），背景候选用 stride（更稀）。
+
+窗口合法性：过滤 seg_start < 0、seg_stop > duration。
+
+鲁棒抽样：当负样本不足时，抽样数量会自动取 min，避免报错。
+
+返回格式统一：与你前面改造的 sequential 一致，便于下游生成器/模型复用。
+
+总结一句话
+
+binary 模式：把所有 ictal 密集采样并保留；interictal 稀疏采样后按 factor×#ictal 抽负样本 → 返回同时含二/三分类标签的 5 列记录（preictal 可能被当作负样本，不会进保留桶）。
+
+triple 模式：在上面基础上再把 preictal 全部密集保留，抽负样本时用 factor×(ictal+preictal) 配比，让三类更均衡。
