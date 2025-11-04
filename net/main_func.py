@@ -35,6 +35,8 @@ def train(config, load_generators, save_generators):
         from net.EEGnet import net
     elif config.model == 'DeepConvNet':
         from net.DeepConv_Net import net
+    elif config.model == 'TransformerEEG':
+        from net.Transformer_EEG import net
 
     if not os.path.exists(os.path.join(config.save_dir, 'models')):
         os.mkdir(os.path.join(config.save_dir, 'models'))
@@ -138,6 +140,8 @@ def predict(config):
         from net.ChronoNet import net
     elif config.model == 'EEGnet':
         from net.EEGnet import net
+    elif config.model == 'TransformerEEG':
+        from net.Transformer_EEG import net
 
     for rec in tqdm(test_recs_list):
         if os.path.isfile(os.path.join(config.save_dir, 'predictions', name, rec[0] + '_' + rec[1] + '_preds.h5')):
