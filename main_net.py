@@ -47,7 +47,7 @@ config.lr = 0.01
 ###########################################
 
 ##### INPUT CONFIGS:
-config.model = 'ChronoNet'                                      # model architecture (you have 3: Chrononet, EEGnet, DeepConvNet)
+config.model = 'ChronoNet'                                      # model architecture (available: Chrononet, EEGnet, DeepConvNet, TransformerEEG)
 config.dataset = 'SZ2'                                          # patients to use (check 'datasets' folder)
 config.sample_type = 'subsample'                                # sampling method (subsample = remove background EEG segments)
 config.add_to_name = 'test'                                     # str to add to the end of the experiment's config name

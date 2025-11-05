@@ -7,7 +7,7 @@ class Config():
     
     Args:
         data_path (str): path to data
-        model (str): model architecture (you have 3: Chrononet, EEGnet, DeepConvNet)
+        model (str): model architecture (available: Chrononet, EEGnet, DeepConvNet, TransformerEEG)
         dataset (str): patients split  (check 'datasets' folder)
 
         fs (int): desired sampling frequency of the input data.

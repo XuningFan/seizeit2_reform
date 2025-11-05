@@ -55,27 +55,24 @@ def net(config):
     )(x)
 
     # Positional embedding (learned)
-    # Compute token length dynamically
-    def get_len(t):
-        return kr.backend.shape(t)[-2]
-
-    def tile_positional_embedding(seq, pe):
-        # pe shape: (1, max_len, embed_dim), seq: (B, L, D) -> slice to L
-        l = kr.backend.shape(seq)[1]
-        return pe[:, :l, :]
-
+    # Use a simpler approach: create positional embeddings as a learnable weight matrix
     max_pos_len = getattr(config, 'transformer_max_pos_len', 2048)
-    pos_emb = layers.Embedding(
-        input_dim=max_pos_len,
-        output_dim=embed_dim
-    )
-
-    # Create positions [0..L-1]
-    positions = layers.Lambda(lambda t: kr.backend.arange(0, get_len(t)))(x)
-    positions = layers.Lambda(lambda p: kr.backend.expand_dims(p, axis=0))(positions)
-    positions = layers.Lambda(lambda p: kr.backend.tile(p, (kr.backend.shape(x)[0], 1)))(positions)
-    p = pos_emb(positions)
-    x = layers.Add()([x, p])
+    
+    # Create positional embeddings as a learnable layer
+    pos_emb_table = layers.Embedding(max_pos_len, embed_dim)
+    
+    # Create position indices [0, 1, 2, ..., seq_len-1] dynamically
+    def get_positions(inputs):
+        seq_len = kr.backend.shape(inputs)[1]
+        positions = kr.backend.arange(0, seq_len)
+        positions = kr.backend.expand_dims(positions, 0)  # (1, seq_len)
+        batch_size = kr.backend.shape(inputs)[0]
+        positions = kr.backend.tile(positions, [batch_size, 1])  # (batch_size, seq_len)
+        return positions
+    
+    pos_indices = layers.Lambda(get_positions)(x)
+    pos_emb = pos_emb_table(pos_indices)
+    x = layers.Add()([x, pos_emb])
 
     x = layers.Dropout(dropout_rate)(x)
 
